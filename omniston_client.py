@@ -85,11 +85,18 @@ async def build_transaction(quote_id: str, donor_wallet: str) -> Dict[str, Any]:
                     
                 if "result" in data:
                     tx = data["result"]
+                    
+                    print("\n--- RAW STON JSON ---")
+                    print(json.dumps(tx, indent=2))
+                    print("---------------------\n")
+                    
+                    # Extract the first message from the messages array
+                    message = tx["messages"][0]
+                    
                     return {
-                        # STON.fi returns nested chain addresses, we need the string
-                        "to": tx.get("to_address", {}).get("ton", ""),
-                        "value": tx.get("amount_units", "0"),
-                        "payload": tx.get("payload", ""),
+                        "to": message["target_address"],
+                        "value": message["send_amount"],
+                        "payload": message["payload"],
                         # TON Connect needs a validUntil timestamp (current time + 5 minutes)
                         "valid_until": int(time.time()) + 300 
                     }
