@@ -5,7 +5,7 @@ import time
 from typing import Dict, Any
 
 # Your vault address - CHANGE THIS
-VAULT_ADDRESS = "EQD0fUSLiNJSoemRotaKcORECcTsf6VQHYqmCnYXqYXDwBOy"  # Your deployed V2 vault
+VAULT_ADDRESS = "UQDAAC0a8kYeEsJqwNEiiTsMF6rqCbzvH11ofFgW-qL3Fbff"  # Your deployed V2 vault
 
 async def get_quote(ton_amount: float) -> Dict[str, Any]:
     """Get instant STON.fi quote"""
