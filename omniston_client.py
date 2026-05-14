@@ -130,13 +130,4 @@ async def get_donation_payload(ton_amount: float, wallet_address: str) -> Dict[s
     }
 
 
-# Test function
-if __name__ == "__main__":
-    async def test():
-        result = await get_donation_payload(
-            ton_amount=1.0,
-            wallet_address="EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2"  # Example
-        )
-        print(json.dumps(result, indent=2))
-    
-    asyncio.run(test())
+
