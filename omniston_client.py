@@ -3,9 +3,21 @@ import websockets
 import json
 import time
 from typing import Dict, Any
+# Import pytoniq_core to handle the address parsing properly
+from pytoniq_core import Address
 
-# Your vault address - CHANGE THIS
-VAULT_ADDRESS = "UQDAAC0a8kYeEsJqwNEiiTsMF6rqCbzvH11ofFgW-qL3Fbff"  # Your deployed V2 vault
+# Your vault address
+VAULT_ADDRESS = "UQDAAC0a8kYeEsJqwNEiiTsMF6rqCbzvH11ofFgW-qL3Fbff"  
+
+def standardize_address(addr_str: str) -> str:
+    """
+    Converts any TON address format safely into its raw hex representation
+    (e.g., 0:002d1a32...) so STON.fi can read it without errors.
+    """
+    try:
+        return Address(addr_str).to_str(is_user_friendly=False)
+    except Exception as e:
+        raise ValueError(f"Invalid TON address provided: {addr_str}. Details: {e}")
 
 async def get_quote(ton_amount: float) -> Dict[str, Any]:
     """Get instant STON.fi quote"""
@@ -48,7 +60,7 @@ async def get_quote(ton_amount: float) -> Dict[str, Any]:
                     "quote_id": quote["quote_id"],
                     "rfq_id": quote["rfq_id"],
                     "usdt_output": int(quote["output_units"]) / 1e6,
-                    "protocol": quote["swap"]["routes"][0]["steps"][0]["chunks"][0]["protocol"],
+                    "protocol": quote["swap"]["routes"]["steps"]["chunks"]["protocol"],
                     "min_output": int(quote["swap"]["min_output_amount"]) / 1e6
                 }
 
@@ -57,17 +69,21 @@ async def get_quote(ton_amount: float) -> Dict[str, Any]:
 
 
 async def build_transaction(quote_id: str, donor_wallet: str) -> Dict[str, Any]:
-    """Build swap transaction with quote_id using correct v1beta8 schema"""
+    """Build swap transaction with quote_id using raw standardized addresses"""
     uri = "wss://omni-ws.ston.fi/"
+
+    # Safely sanitize both addresses to raw hex formats
+    raw_donor = standardize_address(donor_wallet)
+    raw_vault = standardize_address(VAULT_ADDRESS)
 
     payload = {
         "jsonrpc": "2.0",
-        "id": 2, # Using ID 2 to track this specific request
+        "id": 2, 
         "method": "stonfi.omni.v1beta8.TonRpc.BuildSwap",
         "params": {
             "quote_id": quote_id,
-            "transfer_src_address": {"ton": donor_wallet},
-            "trader_dst_address": {"ton": VAULT_ADDRESS}
+            "transfer_src_address": {"ton": raw_donor},
+            "trader_dst_address": {"ton": raw_vault}
         }
     }
 
@@ -78,7 +94,6 @@ async def build_transaction(quote_id: str, donor_wallet: str) -> Dict[str, Any]:
             response = await websocket.recv()
             data = json.loads(response)
             
-            # We are looking for the exact response to our ID 2 request
             if data.get("id") == 2:
                 if "error" in data:
                     raise Exception(f"STON.fi Payload Error: {data['error']}")
@@ -90,14 +105,12 @@ async def build_transaction(quote_id: str, donor_wallet: str) -> Dict[str, Any]:
                     print(json.dumps(tx, indent=2))
                     print("---------------------\n")
                     
-                    # Extract the first message from the messages array
-                    message = tx["messages"][0]
+                    message = tx["messages"]
                     
                     return {
                         "to": message["target_address"],
                         "value": message["send_amount"],
                         "payload": message["payload"],
-                        # TON Connect needs a validUntil timestamp (current time + 5 minutes)
                         "valid_until": int(time.time()) + 300 
                     }
 
@@ -106,10 +119,7 @@ async def get_donation_payload(ton_amount: float, wallet_address: str) -> Dict[s
     Complete flow: Get quote + Build transaction
     Returns everything frontend needs
     """
-    # Step 1: Get quote
     quote = await get_quote(ton_amount)
-    
-    # Step 2: Build transaction
     tx = await build_transaction(quote["quote_id"], wallet_address)
     
     return {
@@ -128,6 +138,3 @@ async def get_donation_payload(ton_amount: float, wallet_address: str) -> Dict[s
             "valid_until": tx["valid_until"]
         }
     }
-
-
-
