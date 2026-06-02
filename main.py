@@ -1,8 +1,8 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, field_validator
 import asyncio
-from omniston_client import get_donation_payload, VAULT_ADDRESS
+from omniston_client import get_ton_swap_payload, get_direct_usdt_payload, VAULT_ADDRESS
 
 app = FastAPI(title="Mayana's Trust API")
 
@@ -17,28 +17,47 @@ app.add_middleware(
 class DonationRequest(BaseModel):
     amount: float
     wallet_address: str
+    currency: str = "TON"  # Accepts "TON" or "USDT"
     
-    @validator('amount')
-    def validate_amount(cls, v):
-        if v < 0.1:
-            raise ValueError('Minimum donation is 0.1 TON')
+    @field_validator('amount')
+    @classmethod
+    def validate_amount(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError('Donation amount must be greater than 0')
         return v
     
-    @validator('wallet_address')
-    def validate_wallet(cls, v):
+    @field_validator('wallet_address')
+    @classmethod
+    def validate_wallet(cls, v: str) -> str:
         if not (v.startswith('EQ') or v.startswith('UQ')) or len(v) != 48:
             raise ValueError('Invalid TON wallet address')
         return v
 
+    @field_validator('currency')
+    @classmethod
+    def validate_currency(cls, v: str) -> str:
+        upper_v = v.upper()
+        if upper_v not in ["TON", "USDT"]:
+            raise ValueError('Currency must be either TON or USDT')
+        return upper_v
+
 
 @app.post("/api/get-payload")
 async def get_payload(request: DonationRequest):
-    """Main endpoint: Returns transaction payload for TON Connect"""
+    """Main endpoint: Returns transaction payload for TON Connect based on currency choice"""
     try:
-        result = await get_donation_payload(
-            ton_amount=request.amount,
-            wallet_address=request.wallet_address
-        )
+        if request.currency == "TON":
+            # Flow 1: User pays TON -> Swaps to USDT -> Goes to Vault
+            result = await get_ton_swap_payload(
+                ton_amount=request.amount,
+                wallet_address=request.wallet_address
+            )
+        else:
+            # Flow 2: User pays USDT directly -> Goes to Vault
+            result = await get_direct_usdt_payload(
+                usdt_amount=request.amount,
+                donor_address=request.wallet_address
+            )
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
