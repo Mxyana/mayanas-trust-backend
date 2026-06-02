@@ -3,21 +3,9 @@ import websockets
 import json
 import time
 from typing import Dict, Any
-# Fixed hyphen to underscore
-from pytoniq_core import Address
 
-# Your vault address
-VAULT_ADDRESS = "UQDAAC0a8kYeEsJqwNEiiTsMF6rqCbzvH11ofFgW-qL3Fbff"  
-
-def standardize_address(addr_str: str) -> str:
-    """
-    Converts any TON address format safely into its raw hex representation
-    (e.g., 0:002d1a32...) so STON.fi can read it without errors.
-    """
-    try:
-        return Address(addr_str).to_str(is_user_friendly=False)
-    except Exception as e:
-        raise ValueError(f"Invalid TON address provided: {addr_str}. Details: {e}")
+# Your vault address - CHANGE THIS
+VAULT_ADDRESS = "UQDAAC0a8kYeEsJqwNEiiTsMF6rqCbzvH11ofFgW-qL3Fbff"  # Your deployed V2 vault
 
 async def get_quote(ton_amount: float) -> Dict[str, Any]:
     """Get instant STON.fi quote"""
@@ -56,23 +44,12 @@ async def get_quote(ton_amount: float) -> Dict[str, Any]:
             
             if "quote_updated" in result:
                 quote = result["quote_updated"]
-                
-                # Safely parsing the protocol from nested JSON structures/lists
-                protocol = "unknown"
-                routes = quote.get("swap", {}).get("routes", [])
-                if routes and "steps" in routes:
-                    steps = routes["steps"]
-                    if steps and "chunks" in steps:
-                        chunks = steps["chunks"]
-                        if chunks:
-                            protocol = chunks.get("protocol", "unknown")
-
                 return {
                     "quote_id": quote["quote_id"],
                     "rfq_id": quote["rfq_id"],
                     "usdt_output": int(quote["output_units"]) / 1e6,
-                    "protocol": protocol,
-                    "min_output": int(quote.get("swap", {}).get("min_output_amount", 0)) / 1e6
+                    "protocol": quote["swap"]["routes"][0]["steps"][0]["chunks"][0]["protocol"],
+                    "min_output": int(quote["swap"]["min_output_amount"]) / 1e6
                 }
 
             if "keep_alive" in result:
@@ -80,20 +57,17 @@ async def get_quote(ton_amount: float) -> Dict[str, Any]:
 
 
 async def build_transaction(quote_id: str, donor_wallet: str) -> Dict[str, Any]:
-    """Build swap transaction with quote_id using raw standardized addresses"""
+    """Build swap transaction with quote_id using correct v1beta8 schema"""
     uri = "wss://omni-ws.ston.fi/"
-
-    raw_donor = standardize_address(donor_wallet)
-    raw_vault = standardize_address(VAULT_ADDRESS)
 
     payload = {
         "jsonrpc": "2.0",
-        "id": 2, 
+        "id": 2, # Using ID 2 to track this specific request
         "method": "stonfi.omni.v1beta8.TonRpc.BuildSwap",
         "params": {
             "quote_id": quote_id,
-            "transfer_src_address": {"ton": raw_donor},
-            "trader_dst_address": {"ton": raw_vault}
+            "transfer_src_address": {"ton": donor_wallet},
+            "trader_dst_address": {"ton": VAULT_ADDRESS}
         }
     }
 
@@ -104,6 +78,7 @@ async def build_transaction(quote_id: str, donor_wallet: str) -> Dict[str, Any]:
             response = await websocket.recv()
             data = json.loads(response)
             
+            # We are looking for the exact response to our ID 2 request
             if data.get("id") == 2:
                 if "error" in data:
                     raise Exception(f"STON.fi Payload Error: {data['error']}")
@@ -115,23 +90,26 @@ async def build_transaction(quote_id: str, donor_wallet: str) -> Dict[str, Any]:
                     print(json.dumps(tx, indent=2))
                     print("---------------------\n")
                     
-                    # Fix: messages is a list, extract the first entry safely
-                    messages_list = tx.get("messages", [])
-                    if not messages_list:
-                        raise Exception("STON.fi did not return any transacting messages.")
-                    
-                    message = messages_list
+                    # Extract the first message from the messages array
+                    message = tx["messages"][0]
                     
                     return {
                         "to": message["target_address"],
                         "value": message["send_amount"],
                         "payload": message["payload"],
+                        # TON Connect needs a validUntil timestamp (current time + 5 minutes)
                         "valid_until": int(time.time()) + 300 
                     }
 
 async def get_donation_payload(ton_amount: float, wallet_address: str) -> Dict[str, Any]:
-    """Complete flow: Get quote + Build transaction"""
+    """
+    Complete flow: Get quote + Build transaction
+    Returns everything frontend needs
+    """
+    # Step 1: Get quote
     quote = await get_quote(ton_amount)
+    
+    # Step 2: Build transaction
     tx = await build_transaction(quote["quote_id"], wallet_address)
     
     return {
@@ -150,3 +128,6 @@ async def get_donation_payload(ton_amount: float, wallet_address: str) -> Dict[s
             "valid_until": tx["valid_until"]
         }
     }
+
+
+
