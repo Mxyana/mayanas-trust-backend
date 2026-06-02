@@ -3,8 +3,8 @@ import websockets
 import json
 import time
 from typing import Dict, Any
-# Import pytoniq_core to handle the address parsing properly
-from pytoniq-core import Address
+# Fixed hyphen to underscore
+from pytoniq_core import Address
 
 # Your vault address
 VAULT_ADDRESS = "UQDAAC0a8kYeEsJqwNEiiTsMF6rqCbzvH11ofFgW-qL3Fbff"  
@@ -56,12 +56,23 @@ async def get_quote(ton_amount: float) -> Dict[str, Any]:
             
             if "quote_updated" in result:
                 quote = result["quote_updated"]
+                
+                # Safely parsing the protocol from nested JSON structures/lists
+                protocol = "unknown"
+                routes = quote.get("swap", {}).get("routes", [])
+                if routes and "steps" in routes:
+                    steps = routes["steps"]
+                    if steps and "chunks" in steps:
+                        chunks = steps["chunks"]
+                        if chunks:
+                            protocol = chunks.get("protocol", "unknown")
+
                 return {
                     "quote_id": quote["quote_id"],
                     "rfq_id": quote["rfq_id"],
                     "usdt_output": int(quote["output_units"]) / 1e6,
-                    "protocol": quote["swap"]["routes"]["steps"]["chunks"]["protocol"],
-                    "min_output": int(quote["swap"]["min_output_amount"]) / 1e6
+                    "protocol": protocol,
+                    "min_output": int(quote.get("swap", {}).get("min_output_amount", 0)) / 1e6
                 }
 
             if "keep_alive" in result:
@@ -72,7 +83,6 @@ async def build_transaction(quote_id: str, donor_wallet: str) -> Dict[str, Any]:
     """Build swap transaction with quote_id using raw standardized addresses"""
     uri = "wss://omni-ws.ston.fi/"
 
-    # Safely sanitize both addresses to raw hex formats
     raw_donor = standardize_address(donor_wallet)
     raw_vault = standardize_address(VAULT_ADDRESS)
 
@@ -105,7 +115,12 @@ async def build_transaction(quote_id: str, donor_wallet: str) -> Dict[str, Any]:
                     print(json.dumps(tx, indent=2))
                     print("---------------------\n")
                     
-                    message = tx["messages"]
+                    # Fix: messages is a list, extract the first entry safely
+                    messages_list = tx.get("messages", [])
+                    if not messages_list:
+                        raise Exception("STON.fi did not return any transacting messages.")
+                    
+                    message = messages_list
                     
                     return {
                         "to": message["target_address"],
@@ -115,10 +130,7 @@ async def build_transaction(quote_id: str, donor_wallet: str) -> Dict[str, Any]:
                     }
 
 async def get_donation_payload(ton_amount: float, wallet_address: str) -> Dict[str, Any]:
-    """
-    Complete flow: Get quote + Build transaction
-    Returns everything frontend needs
-    """
+    """Complete flow: Get quote + Build transaction"""
     quote = await get_quote(ton_amount)
     tx = await build_transaction(quote["quote_id"], wallet_address)
     
