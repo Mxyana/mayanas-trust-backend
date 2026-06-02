@@ -4,7 +4,7 @@ import json
 import time
 from typing import Dict, Any
 # Import pytoniq_core to handle the address parsing properly
-from pytoniq_core import Address
+from pytoniq-core import Address
 
 # Your vault address
 VAULT_ADDRESS = "UQDAAC0a8kYeEsJqwNEiiTsMF6rqCbzvH11ofFgW-qL3Fbff"  
